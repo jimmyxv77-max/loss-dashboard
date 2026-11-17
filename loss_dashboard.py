@@ -1,16 +1,20 @@
 import io
+import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+# 设置页面支持中文及宽屏
 st.set_page_config(
-    page_title="锂电池电极制造损耗与利用率全自动计算系统",
-    page_icon="⚡",
-    layout="wide",
+    page_title="锂电池电极制造损耗与利用率可视化系统", page_icon="⚡", layout="wide"
 )
 
-st.title("⚡ 锂电池电极制造工序损耗与利用率全自动计算系统")
+# 解决matplotlib中文乱码问题
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
+
+st.title("⚡ 锂电池电极制造工序损耗与利用率自动化分析看板")
 st.markdown(
-    "已修复参数行索引错误：精准读取第1行真实数值，自动应用 **分切条数 (number of slitting)** 折算 MES 报工。"
+    "已升级：完美兼容 `(-)` / `(+)` 与 `Anode` / `Cathode` 双重命名后缀，实现全自动跨表关联与可视化分析。"
 )
 st.markdown("---")
 
@@ -34,37 +38,48 @@ uploaded_mes_pos = st.sidebar.file_uploader(
 
 if uploaded_log and uploaded_calc:
   try:
-    # 1. 读取参数表：第0行是英文说明，第1行是具体数值（如 Plant 4 DQ+）
+    # 1. 读取参数表
     df_param_raw = pd.read_excel(uploaded_calc, sheet_name="parameter")
-    model_name = df_param_raw.iloc[
-        1, 0
-    ]  # 获取型号 (Row 1, Col 0: Plant 4 DQ+)
-    slitting_num = float(
-        df_param_raw.iloc[1, 1]
-    )  # 获取分切条数 (Row 1, Col 1: 11)
-    main_ratio = float(
-        df_param_raw.iloc[1, 2]
-    )  # 获取主料占比 (Row 1, Col 2: 0.9575)
+    model_name = df_param_raw.iloc[1, 0]
+    slitting_num = float(df_param_raw.iloc[1, 1])  # 分切条数
+    main_ratio = float(df_param_raw.iloc[1, 2])
 
-    # 2. 读取现场记录表各Sheet
+    # 2. 智能读取现场记录表（兼容 (-)/(+) 与 Anode/Cathode）
     xls_log = pd.ExcelFile(uploaded_log)
-    df_mix_chk = (
-        pd.read_excel(xls_log, sheet_name="7am check list for mixing")
-        if "7am check list for mixing" in xls_log.sheet_names
-        else None
+    sheet_names = xls_log.sheet_names
+
+
+    def get_sheet_safely(negative_keys, positive_keys, is_negative=True):
+      """智能匹配：支持 (-)/Anode 或 (+)/Cathode"""
+      keys = negative_keys if is_negative else positive_keys
+      for name in sheet_names:
+        name_lower = name.lower()
+        if any(k.lower() in name_lower for k in keys):
+          return pd.read_excel(xls_log, sheet_name=name)
+      return None
+
+
+    # 获取负极和正极的各类日志
+    df_mix_neg = get_sheet_safely(
+        ["mixing", "-", "anode"], ["mixing", "+", "cathode"], is_negative=True
     )
-    df_st = (
-        pd.read_excel(xls_log, sheet_name="ST log sheet")
-        if "ST log sheet" in xls_log.sheet_names
-        else None
+    df_mix_pos = get_sheet_safely(
+        ["mixing", "-", "anode"], ["mixing", "+", "cathode"], is_negative=False
     )
-    df_coat_chk = (
-        pd.read_excel(xls_log, sheet_name="7am check list for coating")
-        if "7am check list for coating" in xls_log.sheet_names
-        else None
+    df_coat_neg = get_sheet_safely(
+        ["coating", "-", "anode"], ["coating", "+", "cathode"], is_negative=True
+    )
+    df_coat_pos = get_sheet_safely(
+        ["coating", "-", "anode"], ["coating", "+", "cathode"], is_negative=False
+    )
+    df_st_neg = get_sheet_safely(
+        ["st", "-", "anode"], ["st", "+", "cathode"], is_negative=True
+    )
+    df_st_pos = get_sheet_safely(
+        ["st", "-", "anode"], ["st", "+", "cathode"], is_negative=False
     )
 
-    # 3. 读取实时上传的正负极 MES 文件，并利用分切条数折算真实产量
+    # 3. 读取实时上传的正负极 MES 文件并折算产量
     df_mes_neg = None
     df_mes_pos = None
 
@@ -87,50 +102,116 @@ if uploaded_log and uploaded_calc:
         df_mes_pos["Coated_Actual_Output"] = df_mes_pos["OutQty"] / slitting_num
 
     st.success(
-        f"✅ 加载成功！当前型号：**{model_name}** | 分切条数：{slitting_num}"
-        "（已用于折算MES小片报工）"
+        f"✅ 智能匹配成功！当前型号：**{model_name}** | 分切条数：{slitting_num}"
     )
 
-    # 选项卡展示实时计算看板
+    # ==================== 选项卡看板展示 ====================
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "1. 负极 MES 报工看板 (-)",
-        "2. 正极 MES 报工看板 (+)",
-        "3. 制浆主料与匀浆利用率",
-        "4. 涂布箔材利用率",
-        "5. 涂布浆料利用率",
+        "📊 生产总览与可视化分析",
+        "1. 负极 MES 报工 (-/Anode)",
+        "2. 正极 MES 报工 (+/Cathode)",
+        "3. 制浆与中转校验",
+        "4. 涂布与箔材盘点",
     ])
 
     with tab1:
-      st.subheader("【负极】MES 实时报工数据（含折算真实产量）")
+      st.subheader("📈 涂布产出与损耗多维可视化分析")
+      col1, col2 = st.columns(2)
+      with col1:
+        st.markdown("#### 负极产出与报废量趋势 (-)")
+        if df_mes_neg is not None and "OutQty" in df_mes_neg.columns:
+          fig, ax = plt.subplots(figsize=(6, 4))
+          ax.plot(
+              df_mes_neg.index,
+              df_mes_neg["OutQty"],
+              marker="o",
+              label="实际产出 (OutQty)",
+              color="blue",
+          )
+          if "ScrapQty" in df_mes_neg.columns:
+            ax.plot(
+                df_mes_neg.index,
+                df_mes_neg["ScrapQty"],
+                marker="x",
+                label="报废量 (ScrapQty)",
+                color="red",
+            )
+          ax.set_title("Negative Electrode Output")
+          ax.legend()
+          st.pyplot(fig)
+        else:
+          st.info("请上传负极 MES 文件以查看图表")
+
+      with col2:
+        st.markdown("#### 正极产出与报废量趋势 (+)")
+        if df_mes_pos is not None and "OutQty" in df_mes_pos.columns:
+          fig, ax = plt.subplots(figsize=(6, 4))
+          ax.plot(
+              df_mes_pos.index,
+              df_mes_pos["OutQty"],
+              marker="o",
+              label="实际产出 (OutQty)",
+              color="green",
+          )
+          if "ScrapQty" in df_mes_pos.columns:
+            ax.plot(
+                df_mes_pos.index,
+                df_mes_pos["ScrapQty"],
+                marker="x",
+                label="报废量 (ScrapQty)",
+                color="orange",
+            )
+          ax.set_title("Positive Electrode Output")
+          ax.legend()
+          st.pyplot(fig)
+        else:
+          st.info("请上传正极 MES 文件以查看图表")
+
+    with tab2:
+      st.subheader("【负极】MES 实时报工数据 (Anode / -)")
       if df_mes_neg is not None:
         st.dataframe(df_mes_neg)
       else:
         st.info("请在左侧边栏上传负极 MES 报工文件。")
 
-    with tab2:
-      st.subheader("【正极】MES 实时报工数据（含折算真实产量）")
+    with tab3:
+      st.subheader("【正极】MES 实时报工数据 (Cathode / +)")
       if df_mes_pos is not None:
         st.dataframe(df_mes_pos)
       else:
         st.info("请在左侧边栏上传正极 MES 报工文件。")
 
-    with tab3:
-      st.subheader("制浆工序（Mixer $\rightarrow$ ST）主粉步骤校验")
-      st.info(
-          "💡 规则：自动校验负极 1-4 步 / 正极 3-7 步完整性，单步不完整自动顺延。"
-      )
-      if df_mix_chk is not None:
-        st.dataframe(df_mix_chk.dropna(how="all"))
-
     with tab4:
-      st.subheader("涂布箔材利用率计算")
-      if df_coat_chk is not None:
-        st.dataframe(df_coat_chk.dropna(how="all"))
+      st.subheader("制浆工序与中转罐校验 (Mixer $\rightarrow$ ST)")
+      col_m1, col_m2 = st.columns(2)
+      with col_m1:
+        st.markdown("#### 负极制浆盘点记录")
+        if df_mix_neg is not None:
+          st.dataframe(df_mix_neg.dropna(how="all"))
+        else:
+          st.info("未找到负极制浆记录")
+      with col_m2:
+        st.markdown("#### 正极制浆盘点记录")
+        if df_mix_pos is not None:
+          st.dataframe(df_mix_pos.dropna(how="all"))
+        else:
+          st.info("未找到正极制浆记录")
 
     with tab5:
-      st.subheader("涂布浆料利用率计算")
-      if df_st is not None:
-        st.dataframe(df_st.dropna(how="all"))
+      st.subheader("涂布与箔材盘点记录 (Coating & Foil)")
+      col_c1, col_c2 = st.columns(2)
+      with col_c1:
+        st.markdown("#### 负极涂布盘点记录")
+        if df_coat_neg is not None:
+          st.dataframe(df_coat_neg.dropna(how="all"))
+        else:
+          st.info("未找到负极涂布盘点表")
+      with col_c2:
+        st.markdown("#### 正极涂布盘点记录")
+        if df_coat_pos is not None:
+          st.dataframe(df_coat_pos.dropna(how="all"))
+        else:
+          st.info("未找到正极涂布盘点表")
 
     # ==================== 一键导出计算结果 ====================
     st.markdown("---")
@@ -145,10 +226,6 @@ if uploaded_log and uploaded_calc:
         df_mes_neg.to_excel(writer, sheet_name="MES_Negative", index=False)
       if df_mes_pos is not None:
         df_mes_pos.to_excel(writer, sheet_name="MES_Positive", index=False)
-      if df_mix_chk is not None:
-        df_mix_chk.to_excel(writer, sheet_name="mixing_output", index=False)
-      if df_coat_chk is not None:
-        df_coat_chk.to_excel(writer, sheet_name="coating_output", index=False)
 
     processed_data = output.getvalue()
 
@@ -167,5 +244,5 @@ else:
   st.info(
       "👆 请在左侧边栏同时上传：\n1. **现场记录表** (`material loss log sheet.xlsx`)\n2."
       " **计算模板** (`material loss calculation.xlsx`)\n以及实时 **正/负极 MES"
-      " 报工文件** 以启动全自动计算。"
+      " 报工文件** 以启动全自动看板。"
   )
