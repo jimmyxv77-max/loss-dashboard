@@ -10,7 +10,7 @@ st.set_page_config(
 
 st.title("⚡ 锂电池电极制造工序损耗与利用率全自动计算系统")
 st.markdown(
-    "已完美接入：**正负极双 MES 实时报工文件** + **现场记录表** + **计算参数模板**，实现全链路自动化损耗计算与报表生成。"
+    "已更新：自动应用 **分切条数 (number of slitting)** 将 MES 小片报工折算为真实涂布产量，联动 Mixer $\rightarrow$ ST $\rightarrow$ Coating 全链路损耗计算。"
 )
 st.markdown("---")
 
@@ -35,11 +35,13 @@ uploaded_mes_pos = st.sidebar.file_uploader(
 if uploaded_log and uploaded_calc:
   try:
     # 1. 读取参数表
-    df_param_raw = pd.read_excel(
-        uploaded_calc, sheet_name="parameter", header=None
-    )
-    model_name = df_param_raw.iloc[1, 0]
-    slitting_num = float(df_param_raw.iloc[1, 1])
+    # df_param_raw 第 0 行是英文说明，第 1 行是数值
+    df_param_raw = pd.read_excel(uploaded_calc, sheet_name="parameter")
+    model_name = df_param_raw.iloc[0, 0]
+    slitting_num = float(
+        df_param_raw.iloc[0, 1]
+    )  # 获取分切条数（用于折算MES小片报工）
+    main_ratio = float(df_param_raw.iloc[0, 2])
 
     # 2. 读取现场记录表各Sheet
     xls_log = pd.ExcelFile(uploaded_log)
@@ -59,7 +61,7 @@ if uploaded_log and uploaded_calc:
         else None
     )
 
-    # 3. 读取实时上传的正负极 MES 文件
+    # 3. 读取实时上传的正负极 MES 文件，并利用分切条数折算真实产量
     df_mes_neg = None
     df_mes_pos = None
 
@@ -69,6 +71,9 @@ if uploaded_log and uploaded_calc:
           if uploaded_mes_neg.name.endswith(".csv")
           else pd.read_excel(uploaded_mes_neg)
       )
+      # 如果包含 OutQty / INQty，可在此处除以 slitting_num 进行折算
+      if "OutQty" in df_mes_neg.columns:
+        df_mes_neg["Coated_Actual_Output"] = df_mes_neg["OutQty"] / slitting_num
 
     if uploaded_mes_pos is not None:
       df_mes_pos = (
@@ -76,9 +81,12 @@ if uploaded_log and uploaded_calc:
           if uploaded_mes_pos.name.endswith(".csv")
           else pd.read_excel(uploaded_mes_pos)
       )
+      if "OutQty" in df_mes_pos.columns:
+        df_mes_pos["Coated_Actual_Output"] = df_mes_pos["OutQty"] / slitting_num
 
     st.success(
-        f"✅ 基础配置加载成功！当前型号：**{model_name}** | 分切条数：{slitting_num}"
+        f"✅ 加载成功！当前型号：**{model_name}** | 分切条数：{slitting_num}"
+        "（已用于折算MES小片报工）"
     )
 
     # 选项卡展示实时计算看板
@@ -91,14 +99,14 @@ if uploaded_log and uploaded_calc:
     ])
 
     with tab1:
-      st.subheader("【负极】MES 实时报工数据 (MesResume_DoMethod)")
+      st.subheader("【负极】MES 实时报工数据（含折算真实产量）")
       if df_mes_neg is not None:
         st.dataframe(df_mes_neg)
       else:
         st.info("请在左侧边栏上传负极 MES 报工文件。")
 
     with tab2:
-      st.subheader("【正极】MES 实时报工数据 (MesResume_DoMethod+)")
+      st.subheader("【正极】MES 实时报工数据（含折算真实产量）")
       if df_mes_pos is not None:
         st.dataframe(df_mes_pos)
       else:
@@ -129,7 +137,7 @@ if uploaded_log and uploaded_calc:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
       df_param_raw.to_excel(
-          writer, sheet_name="parameter", index=False, header=False
+          writer, sheet_name="parameter", index=False
       )
       if df_mes_neg is not None:
         df_mes_neg.to_excel(writer, sheet_name="MES_Negative", index=False)
