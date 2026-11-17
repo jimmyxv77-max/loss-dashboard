@@ -1,20 +1,15 @@
 import io
-import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-# 设置页面支持中文及宽屏
+# 设置页面支持宽屏
 st.set_page_config(
     page_title="锂电池电极制造损耗与利用率可视化系统", page_icon="⚡", layout="wide"
 )
 
-# 解决matplotlib中文乱码问题
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
-plt.rcParams['axes.unicode_minus'] = False
-
 st.title("⚡ 锂电池电极制造工序损耗与利用率自动化分析看板")
 st.markdown(
-    "已升级：完美兼容 `(-)` / `(+)` 与 `Anode` / `Cathode` 双重命名后缀，实现全自动跨表关联与可视化分析。"
+    "已升级：采用 Streamlit 原生交互图表，完美兼容 `(-)/(+)` 与 `Anode/Cathode` 双重命名后缀。"
 )
 st.markdown("---")
 
@@ -40,17 +35,22 @@ if uploaded_log and uploaded_calc:
   try:
     # 1. 读取参数表
     df_param_raw = pd.read_excel(uploaded_calc, sheet_name="parameter")
-    model_name = df_param_raw.iloc[1, 0]
-    slitting_num = float(df_param_raw.iloc[1, 1])  # 分切条数
-    main_ratio = float(df_param_raw.iloc[1, 2])
+    model_name = (
+        df_param_raw.iloc[1, 0] if df_param_raw.shape[0] > 1 else "Plant 4 DQ+"
+    )
+    slitting_num = (
+        float(df_param_raw.iloc[1, 1]) if df_param_raw.shape[0] > 1 else 11.0
+    )
+    main_ratio = (
+        float(df_param_raw.iloc[1, 2]) if df_param_raw.shape[0] > 1 else 0.9575
+    )
 
-    # 2. 智能读取现场记录表（兼容 (-)/(+) 与 Anode/Cathode）
+    # 2. 智能读取现场记录表
     xls_log = pd.ExcelFile(uploaded_log)
     sheet_names = xls_log.sheet_names
 
 
     def get_sheet_safely(negative_keys, positive_keys, is_negative=True):
-      """智能匹配：支持 (-)/Anode 或 (+)/Cathode"""
       keys = negative_keys if is_negative else positive_keys
       for name in sheet_names:
         name_lower = name.lower()
@@ -59,7 +59,6 @@ if uploaded_log and uploaded_calc:
       return None
 
 
-    # 获取负极和正极的各类日志
     df_mix_neg = get_sheet_safely(
         ["mixing", "-", "anode"], ["mixing", "+", "cathode"], is_negative=True
     )
@@ -71,12 +70,6 @@ if uploaded_log and uploaded_calc:
     )
     df_coat_pos = get_sheet_safely(
         ["coating", "-", "anode"], ["coating", "+", "cathode"], is_negative=False
-    )
-    df_st_neg = get_sheet_safely(
-        ["st", "-", "anode"], ["st", "+", "cathode"], is_negative=True
-    )
-    df_st_pos = get_sheet_safely(
-        ["st", "-", "anode"], ["st", "+", "cathode"], is_negative=False
     )
 
     # 3. 读取实时上传的正负极 MES 文件并折算产量
@@ -115,55 +108,26 @@ if uploaded_log and uploaded_calc:
     ])
 
     with tab1:
-      st.subheader("📈 涂布产出与损耗多维可视化分析")
+      st.subheader("📈 涂布产出与报废量交互式趋势图")
       col1, col2 = st.columns(2)
+
       with col1:
         st.markdown("#### 负极产出与报废量趋势 (-)")
         if df_mes_neg is not None and "OutQty" in df_mes_neg.columns:
-          fig, ax = plt.subplots(figsize=(6, 4))
-          ax.plot(
-              df_mes_neg.index,
-              df_mes_neg["OutQty"],
-              marker="o",
-              label="实际产出 (OutQty)",
-              color="blue",
-          )
+          chart_data_neg = df_mes_neg[["OutQty"]]
           if "ScrapQty" in df_mes_neg.columns:
-            ax.plot(
-                df_mes_neg.index,
-                df_mes_neg["ScrapQty"],
-                marker="x",
-                label="报废量 (ScrapQty)",
-                color="red",
-            )
-          ax.set_title("Negative Electrode Output")
-          ax.legend()
-          st.pyplot(fig)
+            chart_data_neg["ScrapQty"] = df_mes_neg["ScrapQty"]
+          st.line_chart(chart_data_neg)
         else:
           st.info("请上传负极 MES 文件以查看图表")
 
       with col2:
         st.markdown("#### 正极产出与报废量趋势 (+)")
         if df_mes_pos is not None and "OutQty" in df_mes_pos.columns:
-          fig, ax = plt.subplots(figsize=(6, 4))
-          ax.plot(
-              df_mes_pos.index,
-              df_mes_pos["OutQty"],
-              marker="o",
-              label="实际产出 (OutQty)",
-              color="green",
-          )
+          chart_data_pos = df_mes_pos[["OutQty"]]
           if "ScrapQty" in df_mes_pos.columns:
-            ax.plot(
-                df_mes_pos.index,
-                df_mes_pos["ScrapQty"],
-                marker="x",
-                label="报废量 (ScrapQty)",
-                color="orange",
-            )
-          ax.set_title("Positive Electrode Output")
-          ax.legend()
-          st.pyplot(fig)
+            chart_data_pos["ScrapQty"] = df_mes_pos["ScrapQty"]
+          st.line_chart(chart_data_pos)
         else:
           st.info("请上传正极 MES 文件以查看图表")
 
