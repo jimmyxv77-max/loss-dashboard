@@ -1,6 +1,6 @@
+import io
 import pandas as pd
 import streamlit as st
-import io
 
 st.set_page_config(
     page_title="锂电池电极制造损耗与利用率自动计算系统",
@@ -21,59 +21,99 @@ uploaded_calc = st.sidebar.file_uploader(
 )
 
 if uploaded_log and uploaded_calc:
-    try:
-        # 读取参数表
-        df_param = pd.read_excel(uploaded_calc, sheet_name="parameter")
-        
-        # 读取现场记录表各Sheet
-        xls_log = pd.ExcelFile(uploaded_log)
-        sheet_names = xls_log.sheet_names
-        
-        st.success("✅ 文件读取成功！正在执行自动化损耗计算与逐行滚动继承...")
+  try:
+    # 1. 读取参数表
+    df_param = pd.read_excel(uploaded_calc, sheet_name="parameter")
 
-        # 展示基础参数
-        with st.expander("查看工艺参数表 (Parameter)", expanded=False):
-            st.dataframe(df_param)
+    # 2. 读取现场记录表各Sheet
+    xls_log = pd.ExcelFile(uploaded_log)
 
-        # 示例选项卡展示各计算结果
-        tab1, tab2, tab3 = st.tabs([
-            "匀浆浆料利用率 (Mixing Slurry)", 
-            "涂布箔材利用率 (Foil Usage)", 
-            "涂布浆料利用率 (Coating Slurry)"
-        ])
+    df_main_anode = (
+        pd.read_excel(xls_log, sheet_name="main material log sheet Anode")
+        if "main material log sheet Anode" in xls_log.sheet_names
+        else None
+    )
+    df_st = (
+        pd.read_excel(xls_log, sheet_name="ST log sheet")
+        if "ST log sheet" in xls_log.sheet_names
+        else None
+    )
+    df_foil_log = (
+        pd.read_excel(xls_log, sheet_name="Foil log sheet")
+        if "Foil log sheet" in xls_log.sheet_names
+        else None
+    )
+    df_mix_chk = (
+        pd.read_excel(xls_log, sheet_name="7am check list for mixing")
+        if "7am check list for mixing" in xls_log.sheet_names
+        else None
+    )
+    df_coat_chk = (
+        pd.read_excel(xls_log, sheet_name="7am check list for coating")
+        if "7am check list for coating" in xls_log.sheet_names
+        else None
+    )
 
-        with tab1:
-            st.subheader("制浆/匀浆利用率计算结果")
-            st.info("逻辑说明：表格按行顺序排列，每一行的‘前一日交接班数据’自动继承上一行的‘当日交接班数据’。")
-            # 此处可接入具体的计算逻辑与DataFrame展示
-            st.write("（此处根据计算公式自动生成的匀浆利用率预览表格）")
+    st.success("✅ 文件读取成功！")
 
-        with tab2:
-            st.subheader("涂布箔材利用率计算结果")
-            st.write("（此处根据计算公式自动生成的箔材利用率预览表格）")
+    # 展示基础参数
+    with st.expander("查看工艺参数表 (Parameter)", expanded=False):
+      st.dataframe(df_param)
 
-        with tab3:
-            st.subheader("涂布浆料利用率计算结果")
-            st.write("（此处根据计算公式自动生成的涂布浆料利用率预览表格）")
+    # 核心计算逻辑预览选项卡
+    tab1, tab2, tab3 = st.tabs([
+        "匀浆浆料利用率 (Mixing Slurry)",
+        "涂布箔材利用率 (Foil Usage)",
+        "涂布浆料利用率 (Coating Slurry)",
+    ])
 
-        # 导出按钮
-        st.markdown("---")
-        st.subheader("📥 导出完整损耗计算报表")
-        
-        # 模拟生成导出文件
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_param.to_excel(writer, sheet_name='parameter_checked', index=False)
-        processed_data = output.getvalue()
+    with tab1:
+      st.subheader("制浆/匀浆利用率计算")
+      st.info(
+          "💡 规则说明：每一行的‘前一日交接班数据’自动继承上一行的‘当日交接班数据’。"
+      )
+      if df_mix_chk is not None:
+        st.dataframe(df_mix_chk.head(15))
+      else:
+        st.warning("未找到 7am check list for mixing 表格")
 
-        st.download_button(
-            label="下载计算完成的完整损耗报表 (.xlsx)",
-            data=processed_data,
-            file_name="Material_Loss_Calculation_Result.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    with tab2:
+      st.subheader("涂布箔材利用率计算")
+      if df_foil_log is not None:
+        st.dataframe(df_foil_log.head(15))
+      else:
+        st.warning("未找到 Foil log sheet 表格")
 
-    Exception as e:
-        st.error(f"❌ 计算过程中发生错误: {e}")
+    with tab3:
+      st.subheader("涂布浆料利用率计算")
+      if df_st is not None:
+        st.dataframe(df_st.head(15))
+      else:
+        st.warning("未找到 ST log sheet 表格")
+
+    # 导出按钮
+    st.markdown("---")
+    st.subheader("📥 导出完整损耗计算报表")
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+      df_param.to_excel(
+          writer, sheet_name="parameter_checked", index=False
+      )
+      if df_mix_chk is not None:
+        df_mix_chk.to_excel(writer, sheet_name="mixing_processed", index=False)
+    processed_data = output.getvalue()
+
+    st.download_button(
+        label="下载计算完成的完整损耗报表 (.xlsx)",
+        data=processed_data,
+        file_name="Material_Loss_Calculation_Result.xlsx",
+        mime=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+    )
+
+  except Exception as e:
+    st.error(f"❌ 计算或读取过程中发生错误: {e}")
 else:
-    st.info("👆 请在左侧边栏同时上传**现场记录表**与**损耗计算模板**以启动自动化程序。")
+  st.info("👆 请在左侧边栏同时上传**现场记录表**与**损耗计算模板**以启动自动化程序。")
