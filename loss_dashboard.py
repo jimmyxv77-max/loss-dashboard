@@ -10,7 +10,7 @@ st.set_page_config(
 
 st.title("⚡ 锂电池电极制造工序损耗与利用率全自动计算系统")
 st.markdown(
-    "已更新：自动应用 **分切条数 (number of slitting)** 将 MES 小片报工折算为真实涂布产量，联动 Mixer $\rightarrow$ ST $\rightarrow$ Coating 全链路损耗计算。"
+    "已修复参数行索引错误：精准读取第1行真实数值，自动应用 **分切条数 (number of slitting)** 折算 MES 报工。"
 )
 st.markdown("---")
 
@@ -34,14 +34,17 @@ uploaded_mes_pos = st.sidebar.file_uploader(
 
 if uploaded_log and uploaded_calc:
   try:
-    # 1. 读取参数表
-    # df_param_raw 第 0 行是英文说明，第 1 行是数值
+    # 1. 读取参数表：第0行是英文说明，第1行是具体数值（如 Plant 4 DQ+）
     df_param_raw = pd.read_excel(uploaded_calc, sheet_name="parameter")
-    model_name = df_param_raw.iloc[0, 0]
+    model_name = df_param_raw.iloc[
+        1, 0
+    ]  # 获取型号 (Row 1, Col 0: Plant 4 DQ+)
     slitting_num = float(
-        df_param_raw.iloc[0, 1]
-    )  # 获取分切条数（用于折算MES小片报工）
-    main_ratio = float(df_param_raw.iloc[0, 2])
+        df_param_raw.iloc[1, 1]
+    )  # 获取分切条数 (Row 1, Col 1: 11)
+    main_ratio = float(
+        df_param_raw.iloc[1, 2]
+    )  # 获取主料占比 (Row 1, Col 2: 0.9575)
 
     # 2. 读取现场记录表各Sheet
     xls_log = pd.ExcelFile(uploaded_log)
@@ -71,7 +74,6 @@ if uploaded_log and uploaded_calc:
           if uploaded_mes_neg.name.endswith(".csv")
           else pd.read_excel(uploaded_mes_neg)
       )
-      # 如果包含 OutQty / INQty，可在此处除以 slitting_num 进行折算
       if "OutQty" in df_mes_neg.columns:
         df_mes_neg["Coated_Actual_Output"] = df_mes_neg["OutQty"] / slitting_num
 
